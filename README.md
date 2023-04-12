@@ -1,7 +1,8 @@
 # yolotrim
+
 ## Heuristic read trimming for PacBio IsoSeq data
 
-Supposedly the CCS IsoSeq reads we received should be just the transcript sequence with nothing extraneous like adapters or primers. And yet, they all start and end with suspiciously similar sequence fragments. While we wait for our sequencing CRO to dig deeper into this mystery, let's YOLO trim the reads. 
+`yolotrim` removes poly-A and primer sequences from Iso-Seq FASTQ files when you don't have the HiFi BAM files need to run [lima](https://lima.how/get-started.html)).
 
 ## Usage
 

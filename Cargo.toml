@@ -12,3 +12,5 @@ crate-type = ["cdylib"]
 pyo3 = "0.18.1"
 fastq = "0.6.0"
 num_cpus = "1.15.0"
+regex = "1"
+lazy_static = "1.4.0"

@@ -77,13 +77,13 @@ fn trim_fastq_impl(input_filename : String, output_filename: String, max_primer_
         let max_trim_length = max_primer_length + max_poly_a_length;
         let min_read_length = 2 * max_primer_length + max_poly_a_length;
 
-        let b_regex_str = format!("^[ACGT]{{0, {}}}T{{{}, {}}}", max_primer_length, min_poly_a_length, max_poly_a_length);
-        
         let f_regex_str = format!("A{{{}, {}}}[ACGT]{{0, {}}}$", min_poly_a_length, max_poly_a_length, max_primer_length);
+        let b_regex_str = format!("^[ACGT]{{0, {}}}T{{{}, {}}}", max_primer_length, min_poly_a_length, max_poly_a_length);
         println!("{}", b_regex_str);
         println!("{}", f_regex_str);
-        let b_regex : Regex = Regex::new(&b_regex_str).unwrap();
+        //process::exit(0);
         let f_regex : Regex = Regex::new(&f_regex_str).unwrap();
+        let b_regex : Regex = Regex::new(&b_regex_str).unwrap();
 
         let results: Vec<MatchStats> = parser.parallel_each(nthreads, move |record_sets| {
             let mut too_short : u32 = 0;
@@ -102,8 +102,8 @@ fn trim_fastq_impl(input_filename : String, output_filename: String, max_primer_
                         too_short += 1; 
                         continue;
                     }
-                    let forwards_match=f_regex.is_match(&seq[..max_trim_length]);
-                    let backwards_match=b_regex.is_match(&seq[(n - max_trim_length) .. ]);
+                    let forwards_match=f_regex.is_match(&seq[(n - max_trim_length) .. ]);
+                    let backwards_match=b_regex.is_match(&seq[..max_trim_length]);
                     if forwards_match { 
                         if backwards_match {
                             double_matches += 1;

@@ -10,6 +10,6 @@ def main():
     print("=== yolotrim ===")
     args = parser.parse_args()
     print("Args: %s" % (args, ))
-    print_fastq(args.input)
+    # print_fastq(args.input)
     trim_fastq(args.input, args.output)
     

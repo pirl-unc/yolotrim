@@ -1,10 +1,19 @@
 use pyo3::prelude::*;
 use num_cpus;
+
+use std::fmt; 
+use flate2::write;
+use flate2::Compression;
+use std::error::Error;
+use std::ffi::OsStr;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::Path;
 use std::str;
 use std::ops;
 use regex::bytes::Regex;
 use fastq::{parse_path, Record};
-use std::process;
+use std::cmp::*;
 
 
 
@@ -55,6 +64,14 @@ struct MatchStats {
     num_double_matches : u32,
     num_too_short : u32,
 }
+
+#[derive(Debug)]
+struct Entry {
+    id : String,
+    seq : String,
+    qual : String,
+}
+
 impl ops::Add<MatchStats> for MatchStats {
     type Output = MatchStats;
 
@@ -69,28 +86,63 @@ impl ops::Add<MatchStats> for MatchStats {
     }
 }
 
+
+pub fn writer(filename: &str) -> Box<dyn Write> {
+    /*
+    Copied from: https://users.rust-lang.org/t/write-to-normal-or-gzip-file-transparently/35561
+
+    Write normal or compressed files seamlessly
+    Uses the presence of a `.gz` extension to decide
+    Attempting to have a file writer too
+    */
+    let path = Path::new(filename);
+    let file = match File::create(&path) {
+        Err(why) => panic!("couldn't open {}: {}", path.display(), why.description()),
+        Ok(file) => file,
+    };
+
+    if path.extension() == Some(OsStr::new("gz")) {
+        // Error is here: Created file isn't gzip-compressed
+        Box::new(BufWriter::with_capacity(
+            128 * 1024,
+            write::GzEncoder::new(file, Compression::default()),
+        ))
+    } else {
+        Box::new(BufWriter::with_capacity(128 * 1024, file))
+    }
+}
+
+
+/// Implementation is taken from https://doi.org/10.1101/082214
+pub fn revcomp(seq: &[u8]) -> Vec<u8> {
+    seq.iter()
+        .rev()
+        .map(|c| if c & 2 != 0 { c ^ 4 } else { c ^ 21 })
+        .collect()
+}
+
+
 fn trim_fastq_impl(input_filename : String, output_filename: String, max_primer_length : usize, min_poly_a_length : usize, max_poly_a_length : usize) -> () {
- 
     parse_path(Some(input_filename), |parser| {
         let ncpus : usize = num_cpus::get();
         let nthreads = if ncpus > 1 { ncpus - 1 } else { 1 };
         let max_trim_length = max_primer_length + max_poly_a_length;
-        let min_read_length = 2 * max_primer_length + max_poly_a_length;
+        let min_read_length = 2 * max_primer_length + min_poly_a_length;
 
-        let f_regex_str = format!("A{{{}, {}}}[ACGT]{{0, {}}}$", min_poly_a_length, max_poly_a_length, max_primer_length);
-        let b_regex_str = format!("^[ACGT]{{0, {}}}T{{{}, {}}}", max_primer_length, min_poly_a_length, max_poly_a_length);
-        println!("{}", b_regex_str);
-        println!("{}", f_regex_str);
-        //process::exit(0);
+        let f_regex_str = format!("(A{{{}, {}}}([CGT]A{{{}, {}}})*)[ACGT]{{0, {}}}$", min_poly_a_length, max_poly_a_length, min_poly_a_length, max_poly_a_length, max_primer_length);
+        let b_regex_str = format!("^[ACGT]{{0, {}}}((T{{{}, {}}}[ACG])*T{{{}, {}}})", max_primer_length,  min_poly_a_length, max_poly_a_length, min_poly_a_length, max_poly_a_length);
+
         let f_regex : Regex = Regex::new(&f_regex_str).unwrap();
         let b_regex : Regex = Regex::new(&b_regex_str).unwrap();
 
-        let results: Vec<MatchStats> = parser.parallel_each(nthreads, move |record_sets| {
+        let results: Vec<(MatchStats, Vec<Entry>)> = parser.parallel_each(nthreads, move |record_sets| {
             let mut too_short : u32 = 0;
             let mut total_records = 0;
             let mut forwards_matches = 0;
             let mut backwards_matches = 0;
             let mut double_matches = 0;
+            let mut trimmed_records : Vec<Entry> = Vec::new();
+
             for record_set in record_sets {
                 for record in record_set.iter() {
                     let id = record.head();
@@ -102,59 +154,75 @@ fn trim_fastq_impl(input_filename : String, output_filename: String, max_primer_
                         too_short += 1; 
                         continue;
                     }
-                    let forwards_match=f_regex.is_match(&seq[(n - max_trim_length) .. ]);
-                    let backwards_match=b_regex.is_match(&seq[..max_trim_length]);
-                    if forwards_match { 
-                        if backwards_match {
-                            double_matches += 1;
-                        } else {
-                            forwards_matches += 1; 
-                        }
-                    }
-                    else if backwards_match { 
-                        backwards_matches += 1; 
-                    }
-                 
-                    /* 
+                    let slice_length : usize = min(n, max_trim_length);
+    
+                    let prefix = &seq[..slice_length];
                     
-                    println!("f={forwards_match:?} b={backwards_match:?} | {seq_start:?}...{seq_end:?}", 
-                        forwards_match=FORWARD_RE.is_match(seq),
-                        backwards_match=BACKWARD_RE.is_match(seq),
-                        seq_start=str::from_utf8(&seq[..100]).unwrap(), 
-                        seq_end=str::from_utf8(&seq[n - 100..]).unwrap(), 
-                    
-                    );
-                    */
-                    
+                    let suffix: &[u8] = &seq[n - slice_length ..];
+
+                    let maybe_f_match = f_regex.find(suffix);
+                    let maybe_b_match = b_regex.find(prefix);
+
+                    match (maybe_f_match, maybe_b_match) {
+                        (None, None) => {},
+                        (Some(_), Some(_)) => {
+                            double_matches += 1; 
+                        },
+                        (Some(f_match), None) => {
+                            forwards_matches += 1;
+                            
+                            let n_trimmed = f_match.len();
+                            let new_seq = &seq[..n - n_trimmed];
+                            let new_quals = &qual[..n - n_trimmed];
+
+                            trimmed_records.push(Entry{
+                                id: str::from_utf8(id).unwrap().to_string(), 
+                                seq: str::from_utf8(new_seq).unwrap().to_string(),
+                                qual: str::from_utf8(new_quals).unwrap().to_string()});
+
+                        },
+                        (None, Some(b_match)) => {
+                            backwards_matches += 1;
+
+                            let n_trimmed = b_match.len();
+                            
+                            let new_seq = revcomp(&seq[n_trimmed..]);
+                            let new_quals: Vec<u8> = (&qual[n_trimmed..]).iter().rev().map(|x| *x).collect();
+                            
+                            trimmed_records.push(Entry{
+                                id: str::from_utf8(id).unwrap().to_string(), 
+                                seq: str::from_utf8(&new_seq).unwrap().to_string(),
+                                qual: str::from_utf8(&new_quals).unwrap().to_string()});
+                        },
+                    }                 
                 }
                 
-                println!("{total_match:?}/{total_records:?} (missed={missed:?}, double={double:?}, too_short={too_short:?})", 
-                    total_match=forwards_matches + backwards_matches, 
-                    total_records=total_records,
-                    missed=total_records - (forwards_matches + backwards_matches + double_matches),
-                    double=double_matches,
-                    too_short=too_short);
-                
             }
-            MatchStats {
+            let match_stats = MatchStats {
                 num_forwards_matches: forwards_matches, 
                 num_backwards_matches: backwards_matches,
                 num_double_matches: double_matches,
                 num_total: total_records,
                 num_too_short: too_short,
-            }
+            };
+           (match_stats, trimmed_records)
+
         }).expect("Invalid FASTQ file");
+        
         let mut total_records = 0;
         let mut forwards_matches = 0;
         let mut backwards_matches = 0;
         let mut double_matches = 0;
-        let mut too_short : u32 = 0; 
-        for  match_stats in results {
+        let mut too_short : u32 = 0;
+        let mut combined_records = Vec::new();
+
+        for (match_stats, entries) in results {
             forwards_matches += match_stats.num_forwards_matches;
             backwards_matches += match_stats.num_backwards_matches; 
             double_matches += match_stats.num_double_matches;
             total_records += match_stats.num_total;
             too_short += match_stats.num_too_short;
+            combined_records.extend(entries);
         }
         println!("=== {total_match:?}/{total_records:?} (missed={missed:?}, double={double:?}, too_short={too_short:?})", 
             total_match=forwards_matches + backwards_matches, 
@@ -162,12 +230,20 @@ fn trim_fastq_impl(input_filename : String, output_filename: String, max_primer_
             missed=total_records - (forwards_matches + backwards_matches + double_matches),
             double=double_matches,
             too_short=too_short);
+        let mut output_writer = writer(&output_filename);
+        println!("Writing output to {output_filename}", output_filename=output_filename);
+        for entry in combined_records {
+            output_writer.write(format!("{}\n{}\n{}\n", entry.id, entry.seq, entry.qual)).unwrap();
+    
+        };
+        output_writer.flush().unwrap();
+
     }).expect("Invalid compression");
 }
 
 #[pyfunction]
 fn trim_fastq(input_filename : String, output_filename: String) -> PyResult<()> {
-    trim_fastq_impl(input_filename, output_filename, 100, 10, 600);
+    trim_fastq_impl(input_filename, output_filename, 100, 10, 1000);
     Ok(())
 }
 

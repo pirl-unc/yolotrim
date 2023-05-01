@@ -1,5 +1,7 @@
 sudo: false # Use container-based infrastructure
-language: python
+language: rust
+rust:
+  - stable
 python:
   - "3.8"
   - "3.9"

@@ -24,31 +24,17 @@ before_install:
   - python --version
 install:
   - >
-    conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION
-    nose numpy scipy pandas mkl tensorflow pip cython
+    conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION 
+    maturin
   - source activate test-environment
-  # install pysam from conda because I'm having trouble installing Cython
-  # for Python 3 on Travis
-  - conda install -c bioconda pysam
-  - pip install -r requirements.txt --ignore-installed
-  - pip install .
+  - ./develop.sh
+  - pip install pytest
+  - pip install pytest-cov
   - pip install coveralls
-  # TODO: RE-ENABLE INTEGRATION TESTS
-  # install openvax-integration-tests repo and download mhcflurry
-  # TODO: does pysam version in integration tests match?
-  # - git clone https://github.com/openvax/openvax-integration-tests.git
-  # - pip install -r openvax-integration-tests/requirements.txt --ignore-installed
-  - pip install mhcflurry
-  - mhcflurry-downloads fetch models_class1_minimal
-  - export MHCFLURRY_DEFAULT_CLASS1_MODELS="$(mhcflurry-downloads path models_class1_minimal)/models"
 before_script:
   - ./lint.sh
 script:
-  - >
-    nosetests test --with-coverage --cover-package=isovar
-  # removing integration tests until Vaxrank is updated to use new API
-  # &&
-  # nosetests openvax-integration-tests/test
+  - ./test.sh
 after_success: coveralls
 deploy:
   provider: pypi

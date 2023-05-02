@@ -108,22 +108,23 @@ fn infer_5p_primer(min_primer_length : usize, max_primer_length : usize, fastq_e
 }
 
 fn trim_5p_primer_and_format(prefix : String, fastq_entries : &Vec<FastqEntry>) -> Vec<String> {
-    let prefix_one_shorter = prefix[1..prefix.len()-1].to_string();
-    let prefix_two_shorter = prefix[2..prefix.len()-2].to_string();
     let n = prefix.len(); 
+
+    let mut prefixes = Vec::new();
+    for i in 0..n / 2 {
+        prefixes.push(prefix[i ..].to_string());
+    }
+
     fastq_entries.par_iter().map(|entry| {
         let mut trimmed_seq = entry.seq.clone();
         let mut trimmed_qual = entry.qual.clone();
-        if entry.seq.starts_with(&prefix) {
-            trimmed_seq = trimmed_seq[n..].to_string();
-            trimmed_qual = trimmed_qual[n..].to_string();
-        } else if entry.seq.starts_with(&prefix_one_shorter) {
-            trimmed_seq = trimmed_seq[(n - 1)..].to_string();
-            trimmed_qual = trimmed_qual[(n - 1)..].to_string();
-        } else if entry.seq.starts_with(&prefix_two_shorter) {
-            trimmed_seq = trimmed_seq[(n - 2)..].to_string();
-            trimmed_qual = trimmed_qual[(n - 2)..].to_string();
-        };
+        for curr_prefix in &prefixes {
+            if entry.seq.starts_with(curr_prefix) {
+                trimmed_seq = trimmed_seq[curr_prefix.len()..].to_string();
+                trimmed_qual = trimmed_qual[curr_prefix.len()..].to_string();
+                break;
+            }
+        }
         FastqEntry{id: entry.id.clone(), seq: trimmed_seq, qual: trimmed_qual}
     }).map(|entry| {
         format!("@{}\n{}\n+\n{}\n", entry.id, entry.seq, entry.qual)

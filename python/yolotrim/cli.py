@@ -1,3 +1,4 @@
+# pylint: disable = no-name-in-module
 from .yolotrim import trim_fastq
 
 import argparse

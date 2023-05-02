@@ -126,7 +126,7 @@ fn trim_5p_primer_and_format(prefix : String, fastq_entries : &Vec<FastqEntry>) 
         };
         FastqEntry{id: entry.id.clone(), seq: trimmed_seq, qual: trimmed_qual}
     }).map(|entry| {
-        format!("@{}\n{}\n+\n{}", entry.id, entry.seq, entry.qual)
+        format!("@{}\n{}\n+\n{}\n", entry.id, entry.seq, entry.qual)
     }).collect()
 }
 

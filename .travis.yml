@@ -30,6 +30,7 @@ install:
     maturin
   - source activate test-environment
   - ./develop.sh
+  - pip install pylint
   - pip install pytest
   - pip install pytest-cov
   - pip install coveralls

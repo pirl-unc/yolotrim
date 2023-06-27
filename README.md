@@ -9,3 +9,13 @@
 ```sh
 yolotrim --in weird.fastq.gz --out weird.trimmed.fastq.gz
 ```
+
+## Docker
+
+There is a dockerized form available here: [https://hub.docker.com/r/spvensko/yolotrim/tags](https://hub.docker.com/r/spvensko/yolotrim/tags). 
+
+To download it run this:
+
+```sh
+docker pull spvensko/yolotrim:latest
+```

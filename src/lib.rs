@@ -10,7 +10,12 @@ use pyo3::prelude::*;
 
 use num_cpus;
 use regex::bytes::Regex;
-use fastq::{parse_path, Record};
+
+// use fastq::{parse_path, Record};
+use seq_io::fastq::{Reader,Record};
+use seq_io::policy::DoubleUntilLimited;
+
+
 use rustc_hash::FxHashMap;
 use indicatif::ProgressBar;
 use gzp::{par::compress::{ParCompress, ParCompressBuilder}, deflate::Gzip};
@@ -168,6 +173,12 @@ fn trim_fastq_impl(
         min_poly_a_length : usize, 
         max_poly_a_length : usize) -> () {
     println!("Reading FASTQ file {}...", input_filename);
+    
+
+    // The buffer doubles its size until 128 MiB, then grows by steps
+    // of 128 MiB. If it reaches 1 GiB, there will be an error.
+    let policy = DoubleUntilLimited::new(1 << 30, 1 << 32);
+    let mut reader = Reader::from_path("input.fasta").unwrap().set_policy(policy);
 
     parse_path(Some(input_filename), |parser| {
         let max_trim_length = max_primer_length + max_poly_a_length;
